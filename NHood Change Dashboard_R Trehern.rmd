@@ -57,7 +57,8 @@ library( rgdal )
 # load dorling cartogram from github
 # map already contains census data and groups from clustering 
 
-DFW <- geojson_read( "/Users/roberttrehern/Desktop/DFW2.geojson", what="sp" )
+github.url <- "https://github.com/RTrehern-ASU/NHood-Change/blob/main/DFW2.geojson"
+DFW <- geojson_read( x=github.url,  what="sp" )
 
 # reproject the map 
 DFW <- spTransform( DFW, CRS("+init=epsg:3395") )
