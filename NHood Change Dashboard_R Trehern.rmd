@@ -1,0 +1,407 @@
+---
+title: "Models of Neighborhood Change in Dallas - Fort Worth, TX"
+output: 
+  flexdashboard::flex_dashboard:
+    theme: cerulean
+    source: embed
+    smart: false
+runtime: shiny
+---
+
+    
+
+```{r global, echo=F}
+
+# PACKAGES 
+
+
+# dashboard layout, widgets, and uploading
+
+library( flexdashboard )
+library( shiny )
+library( rsconnect )
+
+# data wrangling 
+
+library( dplyr )
+
+
+# formatting output
+
+library( DT )
+library( pander )
+library( knitr )
+library( stargazer )
+
+
+# maps
+
+library( ggmap )
+library( leaflet )
+library( viridis )
+library( geojsonio )
+library( sp )
+library( sf )
+library( tmap )
+library( pals )
+library( rgdal )
+
+```
+
+
+
+```{r, include=FALSE}
+
+# DATA STEPS 
+
+# load dorling cartogram from github
+# map already contains census data and groups from clustering 
+
+DFW <- geojson_read( "/Users/roberttrehern/Desktop/DFW2.geojson", what="sp" )
+
+# reproject the map 
+DFW <- spTransform( DFW, CRS("+init=epsg:3395") )
+
+# convert the sp map format to 
+# an sf (simple features) format:
+# ggmap requires the sf format
+DFW.sf <- st_as_sf( DFW )
+
+# separate out the data frame from the map
+d <- as.data.frame( DFW.sf )
+```
+
+
+Community Demographics  
+=====================================  
+
+Inputs {.sidebar}
+-------------------------------------
+
+```{r}
+dem.variables <- c("pnhwht12", "pnhblk12", "phisp12", "pntv12", "pfb12",
+                     "polang12", "phs12", "pcol12", "punemp12", "pflabf12",
+                     "pprof12", "pmanuf12", "pvet12", "psemp12", "hinc12",
+                     "incpc12", "ppov12", "pown12", "pvac12", "pmulti12",
+                     "mrent12", "mhmval12.x", "p30old12", "p10yrs12", "p18und12",
+                     "p60up12", "p75up12", "pmar12", "pwds12", "pfhh12")
+
+dem.names <- c("Percent white, non-Hispanic", "Percent black, non-Hispanic",
+                "Percent Hispanic", "Percent Native American race",
+                "Percent foreign born", "Percent speaking other language at home, age 5 plus",
+                "Percent with high school degree or less", "Percent with 4-year college degree or more",
+                "Percent unemployed", "Percent female labor force participation",
+                "Percent professional employees", "Percent manufacturing employees",
+                "Percent veteran", "Percent self-employed", "Median HH income, total",
+                "Per capita income", "Percent in poverty, total", "Percent owner-occupied units",
+                "Percent vacant units", "Percent multi-family units", "Median rent",
+                "Median home value", "Percent structures more than 30 years old",
+                "Percent HH in neighborhood 10 years or less", "Percent 17 and under, total",
+                "Percent 60 and older, total", "Percent 75 and older, total",
+                "Percent currently married, not separated", "Percent widowed, divorced and separated",
+                "Percent female-headed families with children")
+
+radioButtons( inputId="demographics", 
+              label = h3("Census Variables"),
+              choiceNames=dem.names,
+              choiceValues=dem.variables,
+              selected="pnhwht12")
+```
+
+
+Row {.tabset}
+-------------------------------------
+
+
+### Choropleth Map
+
+
+```{r}
+
+renderPlot({
+
+# split the selected variable into deciles 
+  
+get_data <- 
+  reactive({
+             DFW.sf <- 
+             DFW.sf %>% 
+             mutate( q = ntile( get(input$demographics), 10 ) )  
+          })
+
+ggplot( get_data() ) +
+    geom_sf( aes( fill = q ), color=NA ) +
+    coord_sf( datum=NA ) +
+    labs( title = paste0( "Choropleth of Select Demographics: ", toupper(input$demographics) ),
+          caption = "Source: Harmonized Census Files",
+          fill = "Population Deciles" ) +
+    scale_fill_gradientn( colours=rev(ocean.balance(10)), guide = "colourbar" ) + 
+    xlim( xmin = -10900000, xmax = -10700000 ) + 
+    ylim( ymin = 3790000, ymax = 3920000 )
+})
+```
+
+
+### Variable Distribution 
+
+```{r}
+renderPlot({
+
+# extract vector x from the data frame 
+# x <-  d[ "pnhwht12" ] %>% unlist()
+  
+get_variable_x <- reactive({ d[ input$demographics ] })
+
+x <- get_variable_x() %>% unlist()
+
+cut.points <- quantile( x, seq( 0, 1, 0.1 ) )
+
+hist( x, breaks=50, 
+      col="gray", border="white", yaxt="n",
+      main=paste0( "Histogram of variable ", toupper( input$demographics ) ),
+      xlab="red lines represent decile cut points" )
+
+abline( v=cut.points, col="darkred", lty=3, lwd=2 )
+})
+```
+
+
+
+
+Neighborhoods  
+===================================== 
+
+### Clusters  
+
+```{r}
+
+# define the bounding box corners 
+
+bb <- st_bbox( c( xmin =  -10900000, xmax = -10700000, 
+                  ymax = 3920000, ymin = 3790000 ), 
+               crs = st_crs("+init=epsg:3395"))
+
+# ADD YOUR CUSTOM LABELS TO THE CLUSTERS 
+
+DFW$cluster[ DFW$cluster == "1" ] <- "Higher % black, veterans, 60+"
+DFW$cluster[ DFW$cluster == "2" ] <- "Higher % white, high per-capita income, 60+"
+DFW$cluster[ DFW$cluster == "3" ] <- "Higher % married homeowners, higher median HH income"
+DFW$cluster[ DFW$cluster == "4" ] <- "Higher % college grads, prof employees w/higher MHV"
+DFW$cluster[ DFW$cluster == "5" ] <- "Higher % veterans 75+, higher % female labor force"
+DFW$cluster[ DFW$cluster == "6" ] <- "Higher % Hispanic w/less than high school degree"
+DFW$cluster[ DFW$cluster == "7" ] <- "Higher % white w/col degree and higher MHV"
+DFW$cluster[ DFW$cluster == "8" ] <- "Higher % multi-fam units and female labor force"
+DFW$cluster[ DFW$cluster == "9" ] <- "Higher % Hispanic, female headed fam w/children"
+
+
+renderTmap({
+
+tmap_mode("view")
+tm_basemap( "CartoDB.Positron" )
+tm_shape( DFW, bbox=bb) + 
+  tm_polygons( col="cluster", palette="Accent",
+               title="Community Types", legend.position = c("left", "bottom"))
+})
+```
+
+
+
+
+NH Change 2000-2010  
+===================================== 
+
+
+
+Inputs {.sidebar}
+-------------------------------------
+
+```{r}
+button.labels <- c("Median Home Value 2000","Median Home Value 2010",
+                   "Value Change 2000-2010","Growth in Home Value")
+button.values <- c("mhv.00","mhv.10","mhv.change","mhv.growth")
+  
+radioButtons( inputId="home.value", 
+              label = h3("Home Values"),
+              choiceNames=button.labels,
+              choiceValues=button.values,
+              selected="mhv.10")
+```
+
+
+
+
+Row {.tabset}
+-------------------------------------
+
+
+
+### Median Home Values
+
+
+```{r}
+
+renderPlot({
+
+# split the selected variable into deciles 
+  
+get_data <- 
+  reactive({
+             DFW.sf <- 
+             DFW.sf %>% 
+             mutate( q = ntile( get(input$home.value), 10 ) )  
+          })
+
+  
+ggplot( get_data(), na.rm=T ) +
+    geom_sf( aes( fill = q ), color=NA ) +
+    coord_sf( datum=NA ) +
+    labs( title = paste0( "Spatial Distribution of Home Values: ", toupper(input$home.value) ),
+          caption = "Source: Harmonized Census Files",
+          fill = "Home Value Deciles" ) +
+    scale_fill_gradientn( colours=rev(ocean.balance(10)), guide = "colourbar" ) + 
+    xlim( xmin = -10900000, xmax = -10700000 ) + 
+    ylim( ymin = 3790000, ymax = 3920000 )
+})
+
+```
+
+
+### Variable Distribution 
+
+```{r}
+renderPlot({
+
+# extract vector x from the data frame 
+# x <-  d[ "pnhwht12" ] %>% unlist()
+
+  
+get_variable_x <- reactive({ d[ input$home.value ] })
+
+x <- get_variable_x() %>% unlist() %>% as.numeric()
+
+cut.points <- quantile( x, seq( 0, 1, 0.1 ) )
+
+hist( x, breaks=50, 
+      col="gray", border="white", yaxt="n",
+      main=paste0( "Histogram of ", toupper( input$home.value ) ),
+      xlab="red lines represent decile cut points" )
+
+abline( v=cut.points, col="darkred", lty=3, lwd=2 )
+
+
+})
+```  
+
+
+
+Drivers of Change   
+===================================== 
+
+
+
+Inputs {.sidebar}
+-------------------------------------
+
+```{r}
+
+button.labels <- c("Median Home Value 2000","Median Home Value 2010","Value Change 2000-2010","Growth in Home Value")
+button.values <- c("mhv.00","mhv.10","mhv.change","mhv.growth")
+  
+radioButtons( inputId="dv", 
+              label = h3("Select Your Dependent Variable"),
+              choiceNames=button.labels,
+              choiceValues=button.values,
+              selected="mhv.00")
+
+
+covariates <- c("pnhwht12", "pnhblk12", "phisp12", "pntv12", "pfb12", "polang12", 
+"phs12", "pcol12", "punemp12", "pflabf12", "pprof12", "pmanuf12", 
+"pvet12", "psemp12", "hinc12", "incpc12", "ppov12", "pown12", 
+"pvac12", "pmulti12", "mrent12", "mhmval12.x", "p30old12", "p10yrs12", 
+"p18und12", "p60up12", "p75up12", "pmar12", "pwds12", "pfhh12")
+
+
+covariate.labels <- c("Percent white, non-Hispanic", "Percent black, non-Hispanic",
+                "Percent Hispanic", "Percent Native American race",
+                "Percent foreign born", "Percent speaking other language at home, age 5 plus",
+                "Percent with high school degree or less", "Percent with 4-year college degree or more",
+                "Percent unemployed", "Percent female labor force participation",
+                "Percent professional employees", "Percent manufacturing employees",
+                "Percent veteran", "Percent self-employed", "Median HH income, total",
+                "Per capita income", "Percent in poverty, total", "Percent owner-occupied units",
+                "Percent vacant units", "Percent multi-family units", "Median rent",
+                "Median home value", "Percent structures more than 30 years old",
+                "Percent HH in neighborhood 10 years or less", "Percent 17 and under, total",
+                "Percent 60 and older, total", "Percent 75 and older, total",
+                "Percent currently married, not separated", "Percent widowed, divorced and separated",
+                "Percent female-headed families with children")
+
+
+checkboxGroupInput( inputId="covariates", 
+              label = h3("Select Variables for Your Model"),
+              choiceNames=covariate.labels,
+              choiceValues=covariates,
+              selected=c("pnhwht12","pprof12","pvac12") )
+
+```
+
+
+
+
+Row {.tabset}
+-------------------------------------
+
+
+
+### Predicting Change 
+
+```{r, results="asis"}
+
+get_covariates <-  reactive({ input$covariates })
+get_dv <-  reactive({ input$dv })
+
+renderUI({
+  
+covariates <- get_covariates() 
+dv <- get_dv()
+
+formula.text <- paste0( dv, " ~ ", paste( covariates, collapse=" + " ) )
+fo <- as.formula( formula.text )
+
+m <- lm( fo, data=d )
+
+
+# HTML( "<div style='width: 60%; margin: 0px auto;'>" )
+HTML( 
+  
+  c("<br><br><br>",
+  "<div type='regression' style='width: 60%; margin: 0px auto;'>",
+  stargazer( m, type="html", omit.stat=c("rsq","f") ),
+  "</div>",
+  "<br><br><br>"
+  )
+  
+  )
+})
+
+# HTML( reg.table )
+```
+
+
+<style>
+
+.chart-shim { overflow: auto; }
+ 
+table{
+   border-spacing:1px;
+   margin-top:30px;
+   margin-bottom:30px;
+   margin-left: auto;
+   margin-right: auto;
+   align:center} 
+
+td{ padding: 6px 10px 6px 10px } 
+
+th{ text-align: left; } 
+
+</style>
